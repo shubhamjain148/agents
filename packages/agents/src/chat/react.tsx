@@ -717,8 +717,10 @@ export function useAgentChat<
    * Covers the full "turn-in-progress" window from the consumer's
    * perspective, including the gap between the model emitting a
    * client-tool call and the server pushing a continuation after
-   * `addToolOutput`. This is independent of the AI SDK's `status`
-   * which only tracks client-initiated request/response cycles.
+   * `addToolOutput`, and a turn the server accepted before this client
+   * reconnected but has not started streaming yet. This is independent
+   * of the AI SDK's `status` which only tracks client-initiated
+   * request/response cycles.
    */
   isServerStreaming: boolean;
   /**
@@ -1083,6 +1085,11 @@ export function useAgentChat<
    * closes, since a new connection legitimately needs a fresh ACK+replay.
    */
   const fallbackAckedResumeRequestIdsRef = useRef<Set<string>>(new Set());
+  // A server turn accepted before this client reconnected that has not
+  // streamed yet; the transport reports it while its resume probe waits.
+  const [pendingServerTurnId, setPendingServerTurnId] = useState<string | null>(
+    null
+  );
 
   // WebSocket-based transport that speaks the CF_AGENT protocol natively.
   // Replaces the old aiFetch + DefaultChatTransport indirection.
@@ -1102,6 +1109,7 @@ export function useAgentChat<
       agent: agentRef.current,
       activeRequestIds: localRequestIdsRef.current,
       cancelOnClientAbort,
+      onPendingServerTurnChange: setPendingServerTurnId,
       onRequestBuffered: (messageId) => {
         if (messageId) {
           pendingBufferedSendIdsRef.current.add(messageId);
@@ -2303,7 +2311,7 @@ export function useAgentChat<
           // resolve "no stream" mid pre-stream window. A later STREAM_RESUMING
           // (stream started) or STREAM_RESUME_NONE (settled without streaming)
           // resolves it. Advisory for clients not awaiting a resume.
-          customTransport.handleStreamPending();
+          customTransport.handleStreamPending(data);
           break;
 
         case MessageType.CF_AGENT_STREAM_RESUMING: {
@@ -3054,7 +3062,9 @@ export function useAgentChat<
   })();
 
   const effectiveIsServerStreaming =
-    isServerStreaming || hasPendingClientToolCalls;
+    isServerStreaming ||
+    hasPendingClientToolCalls ||
+    pendingServerTurnId !== null;
   const isStreaming = status === "streaming" || effectiveIsServerStreaming;
 
   return {

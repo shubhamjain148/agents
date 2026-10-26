@@ -368,6 +368,8 @@ When the server triggers a stream via `saveMessages`, the AI SDK's `status` stay
 | `isServerStreaming` | `true` when a server-initiated stream is active                                                           |
 | `isStreaming`       | `true` when either client or server streaming is active — use this for a universal indicator              |
 
+`isServerStreaming` is also `true` after a reconnect while the server has accepted a turn that has not produced output yet, and `stop()` cancels that turn.
+
 Use `isStreaming` for most UI concerns (disabling the send button, showing a loading indicator). Use `isServerStreaming` only when you need to distinguish between user-initiated and server-initiated streams (for example, to show a different indicator like "Agent is working in the background...").
 
 ```tsx

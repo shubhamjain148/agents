@@ -7542,6 +7542,68 @@ describe("useAgentChat transparent reconnect re-probe (#1784)", () => {
     expect(sawActiveResponseError(consoleErrorSpy)).toBe(false);
     consoleErrorSpy.mockRestore();
   });
+
+  it("reports a pending server turn as streaming and stop() cancels it", async () => {
+    const { agent, target, sentMessages } = createAgentWithTarget({
+      name: "stream-pending-stop",
+      url: "ws://localhost:3000/agents/chat/stream-pending-stop?_pk=abc"
+    });
+
+    let chatInstance: ReturnType<typeof useAgentChat> | null = null;
+
+    const TestComponent = () => {
+      const chat = useAgentChat({
+        agent,
+        getInitialMessages: null,
+        messages: [] as UIMessage[],
+        resume: true
+      });
+      chatInstance = chat;
+      return (
+        <div data-testid="server-streaming">
+          {String(chat.isServerStreaming)}
+        </div>
+      );
+    };
+
+    const screen = await act(async () => {
+      const screen = render(<TestComponent />, {
+        wrapper: ({ children }) => (
+          <StrictMode>
+            <Suspense fallback="Loading...">{children}</Suspense>
+          </StrictMode>
+        )
+      });
+      await sleep(20);
+      return screen;
+    });
+
+    // A reload during the turn's thinking phase: the server accepted the turn
+    // but has produced no output yet.
+    await act(async () => {
+      dispatch(target, { type: "cf_agent_stream_pending", id: "pending-2" });
+      await sleep(20);
+    });
+    await expect
+      .element(screen.getByTestId("server-streaming"))
+      .toHaveTextContent("true");
+
+    await act(async () => {
+      await chatInstance!.stop();
+      await sleep(20);
+    });
+
+    const cancelMessage = sentMessages
+      .map((message) => JSON.parse(message) as Record<string, unknown>)
+      .find((message) => message.type === "cf_agent_chat_request_cancel");
+    expect(cancelMessage).toEqual({
+      type: "cf_agent_chat_request_cancel",
+      id: "pending-2"
+    });
+    await expect
+      .element(screen.getByTestId("server-streaming"))
+      .toHaveTextContent("false");
+  });
 });
 
 describe("useAgentChat terminal frames", () => {

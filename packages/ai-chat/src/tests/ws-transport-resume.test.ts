@@ -1263,6 +1263,87 @@ describe("WebSocketChatTransport STREAM_PENDING keep-waiting (#1784)", () => {
     expect(transport.handleStreamPending()).toBe(false);
   });
 
+  it("names the pending turn until the probe settles", async () => {
+    const changes: Array<string | null> = [];
+    transport = new WebSocketChatTransport<ChatMessage>({
+      agent,
+      activeRequestIds,
+      onPendingServerTurnChange: (requestId) => changes.push(requestId)
+    });
+
+    const promise = transport.reconnectToStream({ chatId: "chat-1" });
+    expect(transport.handleStreamPending({ id: "req-pending" })).toBe(true);
+    expect(transport.pendingServerTurnId).toBe("req-pending");
+
+    transport.handleStreamResuming({ id: "req-pending" });
+    await promise;
+
+    expect(transport.pendingServerTurnId).toBeNull();
+    expect(transport.activeServerTurnId).toBe("req-pending");
+    expect(changes).toEqual(["req-pending", null]);
+  });
+
+  it("forgets the pending turn when the server settles it without a stream", async () => {
+    const promise = transport.reconnectToStream({ chatId: "chat-1" });
+    transport.handleStreamPending({ id: "req-pending" });
+    transport.handleStreamResumeNone();
+
+    await expect(promise).resolves.toBeNull();
+    expect(transport.pendingServerTurnId).toBeNull();
+  });
+
+  it("forgets the pending turn at the extended backstop", async () => {
+    vi.useFakeTimers();
+    try {
+      const promise = transport.reconnectToStream({ chatId: "chat-1" });
+      transport.handleStreamPending({ id: "req-pending" });
+
+      vi.advanceTimersByTime(60001);
+
+      await expect(promise).resolves.toBeNull();
+      expect(transport.pendingServerTurnId).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancelActiveServerTurn cancels the pending turn and settles the probe", async () => {
+    const promise = transport.reconnectToStream({ chatId: "chat-1" });
+    transport.handleStreamPending({ id: "req-pending" });
+
+    expect(transport.cancelActiveServerTurn()).toBe(true);
+
+    await expect(promise).resolves.toBeNull();
+    const cancel = agent.sent
+      .map((message) => JSON.parse(message) as Record<string, unknown>)
+      .find(
+        (message) => message.type === MessageType.CF_AGENT_CHAT_REQUEST_CANCEL
+      );
+    expect(cancel).toEqual({
+      type: MessageType.CF_AGENT_CHAT_REQUEST_CANCEL,
+      id: "req-pending"
+    });
+    expect(transport.pendingServerTurnId).toBeNull();
+    expect(transport.isAwaitingResume()).toBe(false);
+    // Frames already in flight for the cancelled turn stay with the transport.
+    expect(activeRequestIds.has("req-pending")).toBe(true);
+  });
+
+  it("settles the probe when its abort signal fires", async () => {
+    const controller = new AbortController();
+    const promise = transport.reconnectToStream({
+      chatId: "chat-1",
+      abortSignal: controller.signal
+    });
+    transport.handleStreamPending({ id: "req-pending" });
+
+    controller.abort();
+
+    await expect(promise).resolves.toBeNull();
+    expect(transport.isAwaitingResume()).toBe(false);
+    expect(transport.pendingServerTurnId).toBeNull();
+  });
+
   it("extends the tool-continuation probe window too", async () => {
     vi.useFakeTimers();
     try {
