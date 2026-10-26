@@ -345,6 +345,8 @@ export {
   unstable_callable,
   type CallableMetadata
 } from "./callable-decorator";
+import { retryable } from "cloudflare:durable-objects";
+import { isRetryableFor, markRetryable } from "./retryable-methods";
 import {
   copyCallableMetadata,
   decoratedMethods,
@@ -1414,6 +1416,23 @@ export class Agent<
    * }
    */
   static options: AgentStaticOptions = {};
+
+  /**
+   * Mark methods as safe for the runtime to retry over Durable Object RPC.
+   * Use this rather than `retryable()` from `cloudflare:durable-objects`:
+   * Agent replaces public methods with wrappers, and only methods marked
+   * here have their wrappers marked as well.
+   * @example
+   * class WorkerAgent extends Agent {
+   *   static {
+   *     this.retryable(this.prototype.doWork);
+   *   }
+   *   async doWork() {}
+   * }
+   */
+  static retryable(...methods: ((...args: never[]) => unknown)[]): void {
+    markRetryable(this, methods);
+  }
 
   /**
    * Resolved options (merges defaults with subclass overrides).
@@ -3029,6 +3048,11 @@ export class Agent<
         // if the method is callable, copy the metadata from the original method
         if (this._isCallable(methodName)) {
           copyCallableMetadata(method, wrappedFunction);
+        }
+
+        // RPC calls the wrapper, so it needs the runtime's retryable mark too
+        if (isRetryableFor(this.constructor, method)) {
+          retryable(wrappedFunction);
         }
 
         // set the wrapped function on the prototype

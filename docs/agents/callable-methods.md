@@ -514,6 +514,24 @@ class OrchestratorAgent extends Agent {
 }
 ```
 
+### Retryable Methods
+
+To let the runtime retry a Durable Object RPC call to a method after a disconnect, mark the method with `this.retryable()` in a static block:
+
+```typescript
+class WorkerAgent extends Agent {
+  static {
+    this.retryable(this.prototype.doWork);
+  }
+
+  async doWork() {
+    // ...
+  }
+}
+```
+
+Only mark methods that are safe to run more than once. Use `this.retryable()` rather than `retryable()` from `cloudflare:durable-objects`: Agent wraps public methods, and a method marked directly is not retryable once wrapped.
+
 ### Why the Distinction?
 
 | RPC Type    | Transport | Use Case                          |

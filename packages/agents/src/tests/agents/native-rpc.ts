@@ -8,6 +8,10 @@ class NativeRpcBaseAgent extends Agent {
 }
 
 export class TestNativeRpcAgent extends NativeRpcBaseAgent {
+  static {
+    this.retryable(this.prototype.retryableRpc);
+  }
+
   private constructionFinished = false;
   private fieldInitializerObservation = this.observeConstruction("field");
   private constructorObservation: string;
@@ -34,6 +38,10 @@ export class TestNativeRpcAgent extends NativeRpcBaseAgent {
     this.ready = true;
   }
 
+  async retryableRpc(): Promise<string> {
+    return "retryable";
+  }
+
   syncApplicationRpc(): { ready: boolean } {
     return { ready: this.ready };
   }
@@ -57,6 +65,9 @@ export class TestNativeRpcAgent extends NativeRpcBaseAgent {
     };
   }
 }
+
+/** `retryableRpc` before construction replaces it with a context wrapper. */
+export const originalRetryableRpc = TestNativeRpcAgent.prototype.retryableRpc;
 
 // The nearest descriptor must remain authoritative during RPC wrapper discovery.
 // Defining this after the class avoids TypeScript treating the intentional
